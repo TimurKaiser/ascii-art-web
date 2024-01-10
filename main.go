@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -14,19 +15,100 @@ type Page struct {
 
 var templates *template.Template
 
-func main() {
-	templates = template.Must(template.ParseFiles("index.html"))
+func init() {
+	templates = template.Must(template.ParseFiles("index.html", "404.html", "500.html"))
+}
 
-	http.HandleFunc("/", homeHandler)
+func main() {
 	http.HandleFunc("/execute", executeHandler)
+	http.HandleFunc("/", homeHandler)
+	http.HandleFunc("/404", notFoundHandler)
+	http.HandleFunc("/500", internalServerErrorHandler)
 
 	http.ListenAndServe(":8080", nil)
 }
 
+func notFoundHandler(w http.ResponseWriter, r *http.Request) {
+	_, err := filepath.Abs("404.html")
+	if err != nil {
+		http.Error(w, "Erreur lors de la résolution du chemin du fichier 404.html", http.StatusNotFound)
+		return
+	}
+
+	var p Page
+	p.Valeur = "404ERROR"
+
+	err = templates.ExecuteTemplate(w, "404.html", p)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Erreur lors de l'exécution du template : %s", err), http.StatusInternalServerError)
+	}
+}
+
 func homeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.Redirect(w, r, "/404", http.StatusSeeOther)
+		return
+	}
+
 	var p Page
 	p.Valeur = "Ascii Art Web"
-	templates.Execute(w, p)
+
+	err := templates.ExecuteTemplate(w, "index.html", p)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Erreur lors de l'exécution du template : %s", err), http.StatusInternalServerError)
+	}
+}
+
+func internalServerErrorHandler(w http.ResponseWriter, r *http.Request) {
+	var p Page
+	p.Valeur = "500ERROR"
+
+	err := templates.ExecuteTemplate(w, "500.html", p)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Erreur lors de l'exécution du template 500 : %s", err), http.StatusInternalServerError)
+	}
+}
+
+func executeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	text := r.FormValue("text")
+	action := r.FormValue("action")
+
+	fileName := getFileName(action)
+	if fileName == "" {
+		http.Error(w, "Action non prise en charge", http.StatusBadRequest)
+		return
+	}
+
+	var result string
+	for _, line := range strings.Split(text, "\\n") {
+		lineResult, err := convertInputWithFile(line, fileName)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result += lineResult
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprint(w, result)
+}
+
+func getFileName(action string) string {
+	switch action {
+	case "Standard":
+		return "standard.txt"
+	case "Shadow":
+		return "shadow.txt"
+	case "Thinkertoy":
+		return "thinkertoy.txt"
+	default:
+		return ""
+	}
 }
 
 func convertInputWithFile(line string, fileName string) (string, error) {
@@ -50,41 +132,4 @@ func convertInputWithFile(line string, fileName string) (string, error) {
 		result += "\n"
 	}
 	return result, nil
-}
-
-func executeHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		text := r.FormValue("text")
-		action := r.FormValue("action")
-
-		args := strings.Split(text, "\\n")
-
-		var fileName string
-		switch action {
-		case "Standard":
-			fileName = "standard.txt"
-		case "Shadow":
-			fileName = "shadow.txt"
-		case "Thinkertoy":
-			fileName = "thinkertoy.txt"
-		default:
-			http.Error(w, "Action non prise en charge", http.StatusBadRequest)
-			return
-		}
-
-		var result string
-		for _, line := range args {
-			lineResult, err := convertInputWithFile(line, fileName)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			result += lineResult
-		}
-
-		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprint(w, result)
-	} else {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
 }
