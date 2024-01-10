@@ -16,7 +16,7 @@ type Page struct {
 var templates *template.Template
 
 func init() {
-	templates = template.Must(template.ParseFiles("index.html", "404.html", "500.html"))
+	templates = template.Must(template.ParseFiles("index.html", "404.html", "500.html", "400.html"))
 }
 
 func main() {
@@ -24,6 +24,7 @@ func main() {
 	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/404", notFoundHandler)
 	http.HandleFunc("/500", internalServerErrorHandler)
+	http.HandleFunc("/400", badRequestHandler)
 
 	http.ListenAndServe(":8080", nil)
 }
@@ -40,7 +41,7 @@ func notFoundHandler(w http.ResponseWriter, r *http.Request) {
 
 	err = templates.ExecuteTemplate(w, "404.html", p)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Erreur lors de l'exécution du template : %s", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Erreur lors de l'exécution du template 404 : %s", err), http.StatusInternalServerError)
 	}
 }
 
@@ -55,7 +56,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 
 	err := templates.ExecuteTemplate(w, "index.html", p)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Erreur lors de l'exécution du template : %s", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Erreur lors de l'exécution du template index : %s", err), http.StatusInternalServerError)
 	}
 }
 
@@ -69,6 +70,15 @@ func internalServerErrorHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func badRequestHandler(w http.ResponseWriter, r *http.Request) {
+	var p Page
+	p.Valeur = "400 Bad Request"
+	err := templates.ExecuteTemplate(w, "400.html", p)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Erreur lors de l'exécution du template 400 : %s", err), http.StatusInternalServerError)
+	}
+}
+
 func executeHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -78,9 +88,14 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 	text := r.FormValue("text")
 	action := r.FormValue("action")
 
+	if !isASCII(text) {
+		http.Redirect(w, r, "/400", http.StatusBadRequest)
+		return
+	}
+
 	fileName := getFileName(action)
 	if fileName == "" {
-		http.Error(w, "Action non prise en charge", http.StatusBadRequest)
+		http.Redirect(w, r, "/500", http.StatusInternalServerError)
 		return
 	}
 
@@ -132,4 +147,13 @@ func convertInputWithFile(line string, fileName string) (string, error) {
 		result += "\n"
 	}
 	return result, nil
+}
+
+func isASCII(s string) bool {
+	for _, char := range s {
+		if char >= 127 {
+			return false
+		}
+	}
+	return true
 }
